@@ -46,17 +46,21 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], i2v: bool, bat
     latent = latent.to(vae.dtype)  # convert to bfloat16, we are not sure if this is correct
 
     if i2v:
-        # extract first frame of contents
-        images = contents[:, :, 0:1, :, :]  # B, C, F, H, W, non contiguous view is fine
+        # extract first/last frame of contents
+        images_first = contents[:, :, 0:1, :, :]  # B, C, 1, H, W
+        images_last = contents[:, :, -1:, :, :]  # B, C, 1, H, W
 
         if clip is not None:
             with torch.amp.autocast(device_type=clip.device.type, dtype=torch.float16), torch.no_grad():
-                clip_context = clip.visual(images)
+                clip_context = clip.visual(images_first)
+                clip_context_last = clip.visual(images_last)
             clip_context = clip_context.to(torch.float16)  # convert to fp16
+            clip_context_last = clip_context_last.to(torch.float16)  # convert to fp16
         else:
             clip_context = None
+            clip_context_last = None
 
-        # encode image latent for I2V
+        # encode image latent for I2V (first frame)
         B, _, _, lat_h, lat_w = latent.shape
         F = contents.shape[2]
 
@@ -70,7 +74,7 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], i2v: bool, bat
 
         # Zero padding for the required number of frames only
         padding_frames = F - 1  # The first frame is the input image
-        images_resized = torch.concat([images, torch.zeros(B, 3, padding_frames, h, w, device=vae.device)], dim=2)
+        images_resized = torch.concat([images_first, torch.zeros(B, 3, padding_frames, h, w, device=vae.device)], dim=2)
         with torch.amp.autocast(device_type=vae.device.type, dtype=vae.dtype), torch.no_grad():
             y = vae.encode(images_resized)
         y = torch.stack(y, dim=0)  # B, C, F, H, W
@@ -79,9 +83,28 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], i2v: bool, bat
         y = y.to(vae.dtype)  # convert to bfloat16
         y = torch.concat([msk, y], dim=1)  # B, 4 + C, F, H, W
 
+        # encode image latent for I2V (last frame, isolated: zeros except last RGB frame)
+        # This avoids leakage from other frames by not using the full-video VAE latents.
+        lat_f = latent.shape[2]
+        msk_last = torch.zeros((B, 4, lat_f, lat_h, lat_w), dtype=vae.dtype, device=vae.device)
+        msk_last[:, :, -1] = 1
+
+        images_resized_last = torch.concat(
+            [torch.zeros(B, 3, padding_frames, h, w, device=vae.device), images_last],
+            dim=2,
+        )
+        with torch.amp.autocast(device_type=vae.device.type, dtype=vae.dtype), torch.no_grad():
+            y_last = vae.encode(images_resized_last)
+        y_last = torch.stack(y_last, dim=0)  # B, C, F, H, W
+        y_last = y_last[:, :, :lat_f]  # match latent length
+        y_last = y_last.to(vae.dtype)
+        y_last = torch.concat([msk_last, y_last], dim=1)  # B, 4 + C, F, H, W
+
     else:
         clip_context = None
+        clip_context_last = None
         y = None
+        y_last = None
 
     # control videos/images
     if batch[0].control_content is not None:
@@ -123,10 +146,12 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], i2v: bool, bat
     for i, item in enumerate(batch):
         l = latent[i]
         cctx = clip_context[i] if clip is not None else None
+        cctx_last = clip_context_last[i] if clip is not None else None
         y_i = y[i] if i2v else None
+        y_last_i = y_last[i] if i2v else None
         control_latent_i = control_latent[i] if control_latent is not None else None
         # print(f"save latent cache: {item.latent_cache_path}, latent shape: {l.shape}")
-        save_latent_cache_wan(item, l, cctx, y_i, control_latent_i)
+        save_latent_cache_wan(item, l, cctx, cctx_last, y_i, y_last_i, control_latent_i)
 
 
 def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batch: list[ItemInfo]):
@@ -214,7 +239,7 @@ def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batc
         logger.info(f"  y shape: {y.shape}, mask: {y[0, :, 0, 0]}, l shape: {l.shape}, clip_context shape: {cctx.shape}")
         logger.info(f"  f_indices: {f_indices}")
 
-        save_latent_cache_wan(item, l, cctx, y, None, f_indices=f_indices)
+        save_latent_cache_wan(item, l, cctx, None, y, None, None, f_indices=f_indices)
 
 
 def main():

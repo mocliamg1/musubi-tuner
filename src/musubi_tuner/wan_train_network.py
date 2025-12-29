@@ -38,6 +38,7 @@ from musubi_tuner.wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
 class WanNetworkTrainer(NetworkTrainer):
     def __init__(self):
         super().__init__()
+        self.i2v_conditioning_mode: str = "first"
 
     # region model specific
 
@@ -54,6 +55,14 @@ class WanNetworkTrainer(NetworkTrainer):
         # we cannot use config.i2v because Fun-Control T2V has i2v flag TODO refactor this
         self._i2v_training = "i2v" in args.task or "flf2v" in args.task
         self._control_training = self.config.is_fun_control
+
+        # Training-only: how I2V conditioning tensor `y` is built.
+        # - first: use cached start-image conditioning (default)
+        # - last:  use the sample's own last latent frame as conditioning (no external image)
+        self.i2v_conditioning_mode = getattr(args, "i2v_conditioning_mode", "first")
+        if self._control_training and self.i2v_conditioning_mode == "last":
+            logger.warning("i2v_conditioning_mode=last is not supported for Fun-Control training. Falling back to 'first'.")
+            self.i2v_conditioning_mode = "first"
 
         self.dit_dtype = detect_wan_sd_dtype(args.dit)
 
@@ -657,18 +666,50 @@ class WanNetworkTrainer(NetworkTrainer):
         image_latents = None
         clip_fea = None
         if self.i2v_training:
-            image_latents = batch["latents_image"]
-            image_latents = image_latents.to(device=accelerator.device, dtype=network_dtype)
+            if self.i2v_conditioning_mode == "last":
+                # Prefer cached last-frame conditioning (isolated last RGB frame encoded by VAE) to avoid temporal leakage.
+                if "latents_image_last" in batch:
+                    image_latents = batch["latents_image_last"].to(device=accelerator.device, dtype=network_dtype)
+                else:
+                    logger.warning(
+                        "i2v_conditioning_mode=last but cache has no latents_image_last. "
+                        "Falling back to using latents[:,:,-1] (may leak temporal info). "
+                        "Please re-run WAN latent caching with an updated musubi-tuner."
+                    )
+                    bsz, c, lat_f, lat_h, lat_w = latents.shape
+                    msk = torch.zeros((bsz, 4, lat_f, lat_h, lat_w), device=accelerator.device, dtype=network_dtype)
+                    msk[:, :, -1] = 1
+                    cond = torch.zeros((bsz, c, lat_f, lat_h, lat_w), device=accelerator.device, dtype=network_dtype)
+                    cond[:, :, -1] = latents[:, :, -1].to(device=accelerator.device, dtype=network_dtype)
+                    image_latents = torch.cat([msk, cond], dim=1)
 
-            if not self.config.v2_2:
-                clip_fea = batch["clip"]
-                clip_fea = clip_fea.to(device=accelerator.device, dtype=network_dtype)
+                # Wan2.1 only: use cached CLIP embeds for last frame if present, otherwise disable.
+                if not self.config.v2_2 and "clip_last" in batch:
+                    clip_fea = batch["clip_last"].to(device=accelerator.device, dtype=network_dtype)
+                    if clip_fea.dim() >= 2 and clip_fea.shape[1] == 1:
+                        clip_fea = clip_fea.squeeze(1)
+                else:
+                    clip_fea = None
+            else:
+                image_latents = batch["latents_image"]
+                image_latents = image_latents.to(device=accelerator.device, dtype=network_dtype)
 
-                # clip_fea is [B, N, D] (normal) or [B, 1, N, D] (one frame) for I2V, and [B, 2, N, D] for FLF2V, we need to reshape it to [B, N, D] for I2V and [B*2, N, D] for FLF2V
-                if clip_fea.shape[1] == 1:
-                    clip_fea = clip_fea.squeeze(1)
-                elif clip_fea.shape[1] == 2:
-                    clip_fea = clip_fea.view(-1, clip_fea.shape[2], clip_fea.shape[3])
+                if not self.config.v2_2:
+                    clip_fea = batch["clip"]
+                    clip_fea = clip_fea.to(device=accelerator.device, dtype=network_dtype)
+
+                    # clip_fea is [B, N, D] (normal) or [B, 1, N, D] (one frame) for I2V, and [B, 2, N, D] for FLF2V, we need to reshape it to [B, N, D] for I2V and [B*2, N, D] for FLF2V
+                    if clip_fea.shape[1] == 1:
+                        clip_fea = clip_fea.squeeze(1)
+                    elif clip_fea.shape[1] == 2:
+                        clip_fea = clip_fea.view(-1, clip_fea.shape[2], clip_fea.shape[3])
+
+            # If the training sample is a still image (F==1), handle it like T2V:
+            # do not provide meaningful start-image conditioning.
+            if latents.shape[2] == 1:
+                # keep tensor shape, but remove information
+                image_latents = torch.zeros_like(image_latents) if image_latents is not None else None
+                clip_fea = None
 
         if self.control_training:
             control_latents = batch["latents_control"]
@@ -721,6 +762,13 @@ def wan_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser
         type=str,
         default=None,
         help="text encoder (CLIP) checkpoint path, optional. If training Wan2.1 I2V model, this is required",
+    )
+    parser.add_argument(
+        "--i2v_conditioning_mode",
+        type=str,
+        default="first",
+        choices=["first", "last"],
+        help="Training-only. How to build I2V conditioning `y`: 'first' uses cached start-image conditioning; 'last' conditions on the sample's own last latent frame.",
     )
     parser.add_argument("--vae_cache_cpu", action="store_true", help="cache features in VAE on CPU")
     parser.add_argument("--one_frame", action="store_true", help="Use one frame sampling method for sample generation")

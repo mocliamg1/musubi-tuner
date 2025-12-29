@@ -207,7 +207,9 @@ def save_latent_cache_wan(
     item_info: ItemInfo,
     latent: torch.Tensor,
     clip_embed: Optional[torch.Tensor],
+    clip_embed_last: Optional[torch.Tensor],
     image_latent: Optional[torch.Tensor],
+    image_latent_last: Optional[torch.Tensor],
     control_latent: Optional[torch.Tensor],
     f_indices: Optional[list[int]] = None,
 ):
@@ -221,8 +223,14 @@ def save_latent_cache_wan(
     if clip_embed is not None:
         sd[f"clip_{dtype_str}"] = clip_embed.detach().cpu()
 
+    if clip_embed_last is not None:
+        sd[f"clip_last_{dtype_str}"] = clip_embed_last.detach().cpu()
+
     if image_latent is not None:
         sd[f"latents_image_{F}x{H}x{W}_{dtype_str}"] = image_latent.detach().cpu()
+
+    if image_latent_last is not None:
+        sd[f"latents_image_last_{F}x{H}x{W}_{dtype_str}"] = image_latent_last.detach().cpu()
 
     if control_latent is not None:
         sd[f"latents_control_{F}x{H}x{W}_{dtype_str}"] = control_latent.detach().cpu()

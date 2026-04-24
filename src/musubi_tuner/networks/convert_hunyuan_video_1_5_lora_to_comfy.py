@@ -12,17 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def main(args):
-    # load source safetensors
-    logger.info(f"Loading source file {args.src_path}")
-    state_dict = {}
-    with safe_open(args.src_path, framework="pt") as f:
-        metadata = f.metadata()
-        for key in f.keys():
-            state_dict[key] = f.get_tensor(key)
-
-    logger.info("Converting...")
-
+def convert_state_dict(state_dict: dict[str, torch.Tensor], reverse: bool = False) -> tuple[dict[str, torch.Tensor], int, int]:
     # Key mapping tables: (sd-scripts format, ComfyUI format)
     double_blocks_mappings = [
         ("img_mlp_fc1", "img_mlp_0"),
@@ -46,7 +36,7 @@ def main(args):
 
         # Apply mappings based on conversion direction
         for src_key, dst_key in mappings:
-            if args.reverse:
+            if reverse:
                 # ComfyUI to sd-scripts: swap src and dst
                 new_k = new_k.replace(dst_key, src_key)
             else:
@@ -60,7 +50,7 @@ def main(args):
 
     # concat or split LoRA for QKV layers
     qkv_count = 0
-    if args.reverse:
+    if reverse:
         # ComfyUI to sd-scripts: split QKV
         keys = list(state_dict.keys())
         for key in keys:
@@ -141,6 +131,21 @@ def main(args):
                 state_dict[f"{new_lora_name}.alpha"] = alpha * 3
 
                 qkv_count += 1
+
+    return state_dict, count, qkv_count
+
+
+def main(args):
+    # load source safetensors
+    logger.info(f"Loading source file {args.src_path}")
+    state_dict = {}
+    with safe_open(args.src_path, framework="pt") as f:
+        metadata = f.metadata()
+        for key in f.keys():
+            state_dict[key] = f.get_tensor(key)
+
+    logger.info("Converting...")
+    state_dict, count, qkv_count = convert_state_dict(state_dict, reverse=args.reverse)
 
     logger.info(f"Direct key renames applied: {count}")
     logger.info(f"QKV LoRA layers processed: {qkv_count}")

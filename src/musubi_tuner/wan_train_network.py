@@ -657,10 +657,20 @@ class WanNetworkTrainer(NetworkTrainer):
         image_latents = None
         clip_fea = None
         if self.i2v_training:
-            image_latents = batch["latents_image"]
-            image_latents = image_latents.to(device=accelerator.device, dtype=network_dtype)
+            # Still images have no temporal start-image conditioning. Keep the I2V
+            # conditioning channel shape for the model, but remove all information.
+            if latents.shape[2] == 1:
+                bsz, channels, frames, height, width = latents.shape
+                image_latents = torch.zeros(
+                    (bsz, channels + 4, frames, height, width),
+                    device=accelerator.device,
+                    dtype=network_dtype,
+                )
+            else:
+                image_latents = batch["latents_image"]
+                image_latents = image_latents.to(device=accelerator.device, dtype=network_dtype)
 
-            if not self.config.v2_2:
+            if not self.config.v2_2 and latents.shape[2] != 1:
                 clip_fea = batch["clip"]
                 clip_fea = clip_fea.to(device=accelerator.device, dtype=network_dtype)
 

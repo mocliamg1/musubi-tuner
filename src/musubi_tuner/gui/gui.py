@@ -132,6 +132,8 @@ def construct_ui():
                         gr.update(),
                         gr.update(),
                         gr.update(),
+                        gr.update(),
+                        gr.update(),
                     )
                 try:
                     os.makedirs(os.path.join(path, "training"), exist_ok=True)
@@ -162,6 +164,8 @@ def construct_ui():
                     new_grad_cp = settings.get("gradient_checkpointing", True)
                     new_fp8_s = settings.get("fp8_scaled", True)
                     new_fp8_l = settings.get("fp8_llm", True)
+                    new_helper_lora = settings.get("helper_lora_path", "")
+                    new_helper_lora_multiplier = settings.get("helper_lora_multiplier", 1.0)
                     new_add_args = settings.get("additional_args", "")
 
                     # Sample image params
@@ -213,6 +217,8 @@ def construct_ui():
                         new_grad_cp,
                         new_fp8_s,
                         new_fp8_l,
+                        new_helper_lora,
+                        new_helper_lora_multiplier,
                         new_add_args,
                         new_sample_enable,
                         new_sample_every_n,
@@ -226,6 +232,8 @@ def construct_ui():
                 except Exception as e:
                     return (
                         f"Error initializing project: {str(e)}",
+                        gr.update(),
+                        gr.update(),
                         gr.update(),
                         gr.update(),
                         gr.update(),
@@ -600,6 +608,12 @@ num_repeats = 1
             with gr.Row():
                 output_name = gr.Textbox(label=i18n("lbl_output_name"), value="my_lora", max_lines=1)
 
+            with gr.Row():
+                helper_lora_path = gr.Textbox(
+                    label=i18n("lbl_helper_lora_path"), placeholder=i18n("ph_helper_lora_path"), max_lines=1
+                )
+                helper_lora_multiplier = gr.Number(label=i18n("lbl_helper_lora_multiplier"), value=1.0)
+
             with gr.Group():
                 gr.Markdown(i18n("header_basic_params"))
                 with gr.Row():
@@ -720,6 +734,8 @@ num_repeats = 1
             grad_cp,
             fp8_s,
             fp8_l,
+            helper_lora,
+            helper_lora_mult,
             add_args,
             should_sample_images,
             sample_every_n,
@@ -740,6 +756,32 @@ num_repeats = 1
                 return "Error: VAE Path not set (configure in Preprocessing). / VAEのパスが設定されていません (Preprocessingで設定してください)。"
             if not te1:
                 return "Error: Text Encoder 1 Path not set (configure in Preprocessing). / Text Encoder 1のパスが設定されていません (Preprocessingで設定してください)。"
+
+            try:
+                split_args = shlex.split(add_args) if add_args else []
+            except Exception as e:
+                return f"Error parsing additional arguments / 追加引数の解析に失敗しました: {str(e)}"
+
+            helper_lora = (helper_lora or "").strip()
+            helper_lora_mult = 1.0 if helper_lora_mult in [None, ""] else helper_lora_mult
+            if helper_lora:
+                if not os.path.exists(helper_lora):
+                    return f"Error: Helper LoRA file not found at {helper_lora} / Helper LoRAファイルが見つかりません: {helper_lora}"
+                try:
+                    helper_lora_mult = float(helper_lora_mult)
+                except Exception:
+                    return "Error: Helper LoRA Multiplier must be a number. / Helper LoRA 倍率は数値で指定してください。"
+                duplicate_helper_args = {
+                    arg.split("=", 1)[0]
+                    for arg in split_args
+                    if arg.split("=", 1)[0] in {"--base_weights", "--base_weights_multiplier"}
+                }
+                if duplicate_helper_args:
+                    duplicates = ", ".join(sorted(duplicate_helper_args))
+                    return (
+                        f"Error: {duplicates} cannot be used in Additional Args when Helper LoRA Path is set. "
+                        f"/ Helper LoRA パスが設定されている場合、追加引数に {duplicates} は指定できません。"
+                    )
 
             dataset_config = os.path.join(project_path, "dataset_config.toml")
             if not os.path.exists(dataset_config):
@@ -764,6 +806,8 @@ num_repeats = 1
                 gradient_checkpointing=grad_cp,
                 fp8_scaled=fp8_s,
                 fp8_llm=fp8_l,
+                helper_lora_path=helper_lora,
+                helper_lora_multiplier=helper_lora_mult,
                 vae_path=vae,
                 text_encoder1_path=te1,
                 additional_args=add_args,
@@ -906,6 +950,9 @@ num_repeats = 1
             inner_cmd.append("--sdpa")
             inner_cmd.append("--split_attn")
 
+            if helper_lora:
+                inner_cmd.extend(["--base_weights", helper_lora, "--base_weights_multiplier", str(helper_lora_mult)])
+
             # Model specific command modification
             if model == "Z-Image-Turbo":
                 pass
@@ -913,12 +960,8 @@ num_repeats = 1
                 pass
 
             # Parse and append additional args
-            if add_args:
-                try:
-                    split_args = shlex.split(add_args)
-                    inner_cmd.extend(split_args)
-                except Exception as e:
-                    return f"Error parsing additional arguments / 追加引数の解析に失敗しました: {str(e)}"
+            if split_args:
+                inner_cmd.extend(split_args)
 
             # Construct the full command string for cmd /c
             # list2cmdline will quote arguments as needed for Windows
@@ -972,6 +1015,8 @@ num_repeats = 1
                 gradient_checkpointing,
                 fp8_scaled,
                 fp8_llm,
+                helper_lora_path,
+                helper_lora_multiplier,
                 additional_args,
                 sample_images,
                 sample_every_n,
@@ -1097,6 +1142,8 @@ num_repeats = 1
                 gradient_checkpointing,
                 fp8_scaled,
                 fp8_llm,
+                helper_lora_path,
+                helper_lora_multiplier,
                 additional_args,
                 sample_images,
                 sample_every_n,

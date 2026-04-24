@@ -12,17 +12,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def main(args):
-    # load source safetensors
-    logger.info(f"Loading source file {args.src_path}")
-    state_dict = {}
-    with safe_open(args.src_path, framework="pt") as f:
-        metadata = f.metadata()
-        for key in f.keys():
-            state_dict[key] = f.get_tensor(key)
-
-    logger.info("Converting...")
-
+def convert_state_dict(
+    state_dict: dict[str, torch.Tensor], reverse: bool = False, lokr_rank: int | None = None
+) -> tuple[dict[str, torch.Tensor], int, int]:
     # Key mapping tables: (sd-scripts format, ComfyUI format)
     blocks_mappings = [
         ("attention_to_out_0", "attention_out"),
@@ -43,7 +35,7 @@ def main(args):
 
         # Apply mappings based on conversion direction
         for src_key, dst_key in mappings:
-            if args.reverse:
+            if reverse:
                 # ComfyUI to sd-scripts: swap src and dst
                 new_k = new_k.replace(dst_key, src_key)
             else:
@@ -57,7 +49,7 @@ def main(args):
 
     # concat or split LoRA/LoHa/LoKr for QKV layers
     qkv_count = 0
-    if args.reverse:
+    if reverse:
         # ComfyUI to sd-scripts: split QKV (LoRA only)
         keys = list(state_dict.keys())
         for key in keys:
@@ -247,8 +239,8 @@ def main(args):
                 U, S, Vt = torch.linalg.svd(delta_qkv, full_matrices=False)
 
                 # Determine rank
-                if args.lokr_rank is not None:
-                    svd_rank = min(args.lokr_rank, S.shape[0])
+                if lokr_rank is not None:
+                    svd_rank = min(lokr_rank, S.shape[0])
                 else:
                     # Auto: keep singular values contributing to 99.99% of total energy (Frobenius norm squared)
                     total_energy = (S**2).sum()
@@ -275,6 +267,21 @@ def main(args):
                 state_dict[f"{new_lora_name}.alpha"] = torch.tensor(float(svd_rank))
 
                 qkv_count += 1
+
+    return state_dict, count, qkv_count
+
+
+def main(args):
+    # load source safetensors
+    logger.info(f"Loading source file {args.src_path}")
+    state_dict = {}
+    with safe_open(args.src_path, framework="pt") as f:
+        metadata = f.metadata()
+        for key in f.keys():
+            state_dict[key] = f.get_tensor(key)
+
+    logger.info("Converting...")
+    state_dict, count, qkv_count = convert_state_dict(state_dict, reverse=args.reverse, lokr_rank=args.lokr_rank)
 
     logger.info(f"Direct key renames applied: {count}")
     logger.info(f"QKV layers processed: {qkv_count}")

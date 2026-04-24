@@ -1302,15 +1302,44 @@ class NetworkTrainer:
     def control_training(self) -> bool:
         return self._control_training
 
-    def convert_weight_keys(self, weights_sd: dict[str, torch.Tensor], network_module: lora_module):
+    def convert_weight_keys(self, weights_sd: dict[str, torch.Tensor], network_module: str):
         keys = list(weights_sd.keys())
+        if len(keys) == 0:
+            raise ValueError("LoRA weights file is empty")
+
+        if network_module.endswith("lora_zimage") and any(
+            marker in key for key in keys for marker in ("attention_qkv", "attention_out", "attention_k_norm", "attention_q_norm")
+        ):
+            logger.info("converting Z-Image LoRA weights from ComfyUI format to default format")
+            from musubi_tuner.networks import convert_z_image_lora_to_comfy
+
+            converted_sd, _, _ = convert_z_image_lora_to_comfy.convert_state_dict(weights_sd, reverse=True)
+            return converted_sd
+
+        if network_module.endswith("lora_hv_1_5") and any(
+            marker in key
+            for key in keys
+            for marker in ("_qkv", "img_mlp_0", "img_mlp_2", "img_mod_lin", "txt_mlp_0", "txt_mlp_2", "txt_mod_lin")
+        ):
+            logger.info("converting HunyuanVideo 1.5 LoRA weights from ComfyUI format to default format")
+            from musubi_tuner.networks import convert_hunyuan_video_1_5_lora_to_comfy
+
+            converted_sd, _, _ = convert_hunyuan_video_1_5_lora_to_comfy.convert_state_dict(weights_sd, reverse=True)
+            return converted_sd
+
         if keys[0].startswith("lora_"):
             return weights_sd  # default format
+
         if keys[0].startswith("diffusion_model.") or keys[0].startswith("transformer."):
             # Diffusers? format
             logger.info("converting LoRA weights from diffusers format to default format")
             return convert_lora.convert_from_diffusers("lora_unet_", weights_sd)
-        return weights_sd  # unknown format, return as is
+
+        raise ValueError(
+            "unsupported LoRA weight format for --base_weights. Supported formats are default/sd-scripts "
+            "(keys starting with lora_), Diffusers/other (keys starting with diffusion_model. or transformer.), "
+            "Z-Image ComfyUI for networks.lora_zimage, and HunyuanVideo 1.5 ComfyUI for networks.lora_hv_1_5."
+        )
 
     def process_sample_prompts(
         self,

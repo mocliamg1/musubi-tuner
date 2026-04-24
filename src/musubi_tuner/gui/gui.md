@@ -239,6 +239,7 @@ Before training, you need to cache the latents and text encoder outputs. This co
 2. **Configure Required Settings**:
    - **Base Model / DiT Path**: Path to the diffusion model (auto-filled if you click the recommended button)
    - **Output Name**: Name for your LoRA file (e.g., `my_character_lora`)
+   - **Helper LoRA Path** (optional): A LoRA to merge into the base model before training. Default/sd-scripts, Diffusers/other, and supported ComfyUI formats are converted automatically.
 
 3. **Basic Parameters** (can use defaults):
    - **LoRA Dim**: LoRA rank/dimension (4-32, higher = more capacity but larger file)
@@ -338,6 +339,8 @@ Download the required model files from the appropriate directory under `split_fi
 |-------|-------------|
 | Base Model / DiT Path | Path to the base diffusion model (DiT). |
 | Output Name | Base name for saved LoRA files (without extension). |
+| Helper LoRA Path | Optional LoRA merged into the base model before training starts. Supports default/sd-scripts, Diffusers/other, and supported ComfyUI formats. |
+| Helper LoRA Multiplier | Strength used when merging the helper LoRA into the base model. Default: 1.0. |
 | LoRA Dim | LoRA rank/dimension. Higher values capture more detail but create larger files. Common values: 4, 8, 16, 32. |
 | Learning Rate | Speed of training. Higher = faster learning but may overshoot. Default: 1e-3 (0.001). |
 | Epochs | Number of complete passes through all training images. |

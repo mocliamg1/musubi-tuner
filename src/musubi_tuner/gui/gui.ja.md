@@ -239,6 +239,7 @@ my_lora_project/
 2. **必須設定の確認**：
    - **Base Model / DiT Path**：ベースとなるdiffusionモデル（DiT）へのパス（推奨ボタンをクリックすると自動入力）
    - **Output Name**：LoRAファイルの名前（例：`my_character_lora`）
+   - **Helper LoRA Path**（任意）：学習前にベースモデルへマージするLoRA。default/sd-scripts、Diffusers/other、対応しているComfyUI形式は自動変換されます。
 
 3. **基本パラメータ**（デフォルト値を使用可能）：
    - **LoRA Dim**：LoRAのランク/次元（4-32、大きいほど容量が増えるがファイルサイズも増加）
@@ -338,6 +339,8 @@ text-encodersとvaeモデルファイルは、[こちら](https://huggingface.co
 |------|------|
 | Base Model / DiT Path | ベースとなるdiffusionモデル（DiT）へのパス。 |
 | Output Name | 保存されるLoRAファイルのベース名（拡張子なし）。 |
+| Helper LoRA Path | 学習開始前にベースモデルへマージする任意のLoRA。default/sd-scripts、Diffusers/other、対応しているComfyUI形式を使用できます。 |
+| Helper LoRA Multiplier | Helper LoRAをベースモデルへマージするときの強度。デフォルト：1.0。 |
 | LoRA Dim | LoRAのランク/次元。大きいほど詳細をキャプチャできますが、ファイルサイズも増加。一般的な値：4、8、16、32。 |
 | Learning Rate | 学習速度。大きいほど速く学習しますが、オーバーシュートする可能性があります。デフォルト：1e-3（0.001）。 |
 | Epochs | 全学習画像を何回学習するか。 |

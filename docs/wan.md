@@ -59,6 +59,8 @@ The Wan2.2 model consists of two DiT models, one for high noise and one for low 
 
 `fp16` models can be used. **Please note that `fp8_scaled` models are not supported even with `--fp8_scaled`.**
 
+If you are using an RTX 50-series GPU such as the RTX 5090, install a PyTorch binary built with CUDA 12.8 or newer. The `scripts/install_wan22_i2v.sh` helper defaults to `cu128` for that reason.
+
 ### Model support matrix / モデルサポートマトリックス
 
 * columns: training dtype (行：学習時のデータ型)
@@ -101,6 +103,8 @@ DiTの重みを次のページからダウンロードしてください：https
 Wan2.2モデルは高ノイズ用と低ノイズ用の2つのDiTモデルで構成されています。両方をダウンロードしてください。
 
 `fp16` モデルを使用できます。**`fp8_scaled` モデルはサポートされませんのでご注意ください。**
+
+RTX 50シリーズGPU（RTX 5090など）を使う場合は、CUDA 12.8以上でビルドされたPyTorchバイナリをインストールしてください。`scripts/install_wan22_i2v.sh` はそのために `cu128` を既定値にしています。
 
 </details>
 

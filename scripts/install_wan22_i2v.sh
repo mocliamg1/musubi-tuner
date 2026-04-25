@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL_DIR="${MODEL_DIR:-$ROOT_DIR/models/wan2.2-i2v}"
-CUDA_FLAVOR="${1:-${CUDA_FLAVOR:-cu124}}"
+CUDA_FLAVOR="${1:-${CUDA_FLAVOR:-cu128}}"
 
 case "$CUDA_FLAVOR" in
     cu124|cu128|cu130)
@@ -31,6 +31,7 @@ need_cmd wget
 mkdir -p "$MODEL_DIR"/diffusion_models "$MODEL_DIR"/text_encoders "$MODEL_DIR"/vae
 
 python3 -m pip install --upgrade pip setuptools wheel
+python3 -m pip uninstall -y torch torchvision torchaudio || true
 python3 -m pip install --index-url "$TORCH_INDEX_URL" torch torchvision
 python3 -m pip install -e "$ROOT_DIR"
 python3 -m pip install ascii-magic matplotlib tensorboard prompt-toolkit
